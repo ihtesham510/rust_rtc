@@ -20,6 +20,14 @@ enum ClientMessages {
     Info,
     #[serde(rename = "get_rooms")]
     GetRooms,
+    #[serde(rename = "send_message")]
+    SendMessageToRoom { message: String, room: String },
+    #[serde(rename = "list_messages")]
+    ListRoomMessages { room: String },
+    #[serde(rename = "get_room")]
+    RoomDetails { room: String },
+    #[serde(rename = "list_connections")]
+    ListConn,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -30,7 +38,14 @@ struct Room {
     admin: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct RoomMessages {
+    by: String,
+    message: String,
+}
+
 type Rooms = Arc<Mutex<HashMap<String, Room>>>;
+type Messages = Arc<Mutex<HashMap<String, Vec<RoomMessages>>>>;
 type Connections = Arc<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Message>>>>;
 
 #[tokio::main]
@@ -42,6 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("WebSocket server running on ws://{}", addr);
 
     let rooms: Rooms = Arc::new(Mutex::new(HashMap::new()));
+    let room_messages: Messages = Arc::new(Mutex::new(HashMap::new()));
     let connections: Connections = Arc::new(Mutex::new(HashMap::new()));
 
     while let Ok((stream, addr)) = listener.accept().await {
@@ -50,46 +66,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             stream,
             rooms.clone(),
             connections.clone(),
+            room_messages.clone(),
         ));
     }
 
     Ok(())
 }
 
-async fn broadcast_to_all(connections: &Connections, message: Message) {
-    let connections_guard = connections.lock().await;
-    let mut failed_users = Vec::new();
-
-    for (user_id, tx) in connections_guard.iter() {
-        if let Err(e) = tx.send(message.clone()) {
-            error!("Failed to broadcast to user {}: {:?}", user_id, e);
-            failed_users.push(user_id.clone());
-        }
-    }
-
-    if !failed_users.is_empty() {
-        info!("Failed to send to {} users", failed_users.len());
-    }
-}
 async fn broadcast_to_room(
     connections: &Connections,
-    message: Message,
     rooms: &Rooms,
+    room_messages: &Messages,
+    message: String,
     room: String,
+    by: String,
 ) {
     let connections_guard = connections.lock().await;
     let rooms_guard = rooms.lock().await;
+    let mut room_messages_guard = room_messages.lock().await;
     let _room = rooms_guard.get(&room.clone()).unwrap();
+
+    {
+        let list = room_messages_guard
+            .entry(room.clone())
+            .or_insert_with(Vec::new);
+
+        list.push(RoomMessages {
+            by: by.clone(),
+            message: message.clone(),
+        });
+    }
+
     for user in _room.users.iter() {
-        let tx = connections_guard.get(user).unwrap();
-        match tx.send(message.clone()) {
-            Ok(_) => return,
-            Err(err) => error!("Error while sending message : {err:?}"),
+        if let Some(tx) = connections_guard.get(user) {
+            if let Err(err) = tx.send(Message::Text(
+                serde_json::json!({
+                    "type":"room_broadcast",
+                    "by":by,
+                    "message":message
+                })
+                .to_string()
+                .into(),
+            )) {
+                error!("Error while sending message to {user:?}: {err:?}")
+            }
+        } else {
+            warn!("User {user:?} not found in connections");
         }
     }
 }
 
-async fn handle_connection(stream: TcpStream, rooms: Rooms, connections: Connections) {
+async fn handle_connection(
+    stream: TcpStream,
+    rooms: Rooms,
+    connections: Connections,
+    room_messages: Messages,
+) {
     let ws_stream = match accept_async(stream).await {
         Ok(ws) => {
             info!("WebSocket handshake successful");
@@ -112,7 +144,6 @@ async fn handle_connection(stream: TcpStream, rooms: Rooms, connections: Connect
         conn.insert(user_id.clone(), tx.clone());
     }
 
-    // Spawn task to handle outgoing messages
     let user_id_clone = user_id.clone();
     let connections_clone = connections.clone();
     tokio::spawn(async move {
@@ -127,16 +158,6 @@ async fn handle_connection(stream: TcpStream, rooms: Rooms, connections: Connect
             }
         }
     });
-
-    // Send welcome message
-    if let Err(e) = tx.send(Message::Text(
-        "Welcome to the WebSocket server!".to_string().into(),
-    )) {
-        error!("Failed to send welcome message: {}", e);
-        connections.lock().await.remove(&user_id);
-        return;
-    }
-
     while let Some(message_result) = read.next().await {
         match message_result {
             Ok(Message::Text(text)) => {
@@ -221,7 +242,14 @@ async fn handle_connection(stream: TcpStream, rooms: Rooms, connections: Connect
                             info!("Room created: {} ({})", room_name, room_id);
                         }
                         ClientMessages::Info => {
-                            let _ = tx.send(Message::Text(user_id.clone().into()));
+                            let _ = tx.send(Message::Text(
+                                serde_json::json!({
+                                    "type":"info",
+                                    "user_id":user_id.clone(),
+                                })
+                                .to_string()
+                                .into(),
+                            ));
                         }
                         ClientMessages::GetRooms => {
                             let mut _rooms: Vec<Room> = vec![];
@@ -230,6 +258,65 @@ async fn handle_connection(stream: TcpStream, rooms: Rooms, connections: Connect
                             }
                             let message = serde_json::to_string(&_rooms.clone()).unwrap();
                             tx.send(Message::Text(message.into())).unwrap();
+                        }
+                        ClientMessages::SendMessageToRoom { message, room } => {
+                            broadcast_to_room(
+                                &connections,
+                                &rooms,
+                                &room_messages,
+                                message.clone(),
+                                room,
+                                user_id.clone(),
+                            )
+                            .await
+                        }
+                        ClientMessages::ListRoomMessages { room } => {
+                            let room_messages_guard = room_messages.lock().await;
+                            if let Some(_list) = room_messages_guard.get(&room) {
+                                info!("list room request received");
+                                let _ = tx.send(Message::Text(
+                                    serde_json::json!({
+                                        "type":"list_messages",
+                                        "messages": _list.to_owned(),
+                                    })
+                                    .to_string()
+                                    .into(),
+                                ));
+                            } else {
+                                let _ = tx.send(Message::Text(
+                                    serde_json::json!({
+                                        "type":"list_messages",
+                                        "messages": [],
+                                    })
+                                    .to_string()
+                                    .into(),
+                                ));
+                            }
+                        }
+                        ClientMessages::ListConn => {
+                            let mut conns: Vec<String> = vec![];
+                            for (conn, _) in connections.lock().await.iter() {
+                                conns.push(conn.to_string());
+                            }
+                            tx.send(Message::Text(
+                                serde_json::json!(
+                                    { "connections":conns,
+                                    "total":conns.len()
+                                    }
+                                )
+                                .to_string()
+                                .into(),
+                            ))
+                            .unwrap();
+                        }
+                        ClientMessages::RoomDetails { room } => {
+                            let rooms_guard = rooms.lock().await;
+                            if let Some(_room) = rooms_guard.get(&room) {
+                                tx.send(Message::Text(
+                                    serde_json::to_string(_room).unwrap().into(),
+                                ))
+                                .unwrap();
+                            }
                         }
                     },
                     Err(e) => {
