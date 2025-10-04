@@ -5,13 +5,15 @@ use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ClientMessage {
+pub enum ClientMessages {
     #[serde(rename = "join")]
     Join { room: String },
     #[serde(rename = "create_room")]
     Create { room_name: String },
     #[serde(rename = "info")]
     Info,
+    #[serde(rename = "get_clients")]
+    GetClients,
     #[serde(rename = "get_rooms")]
     GetRooms,
     #[serde(rename = "send_message")]
@@ -33,13 +35,13 @@ pub struct Room {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct RoomMessage {
+pub struct RoomMessages {
     pub by: String,
     pub message: String,
 }
 
 pub type Rooms = Arc<Mutex<HashMap<String, Room>>>;
-pub type Messages = Arc<Mutex<HashMap<String, Vec<RoomMessage>>>>;
+pub type Messages = Arc<Mutex<HashMap<String, Vec<RoomMessages>>>>;
 pub type Connections = Arc<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Message>>>>;
 
 #[derive(Clone)]
