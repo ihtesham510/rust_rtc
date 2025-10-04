@@ -20,6 +20,8 @@ enum ClientMessages {
     Info,
     #[serde(rename = "get_rooms")]
     GetRooms,
+    #[serde(rename = "get_clients")]
+    GetClients,
     #[serde(rename = "send_message")]
     SendMessageToRoom { message: String, room: String },
     #[serde(rename = "list_messages")]
@@ -299,11 +301,10 @@ async fn handle_connection(
                                 conns.push(conn.to_string());
                             }
                             tx.send(Message::Text(
-                                serde_json::json!(
-                                    { "connections":conns,
+                                serde_json::json!({
+                                    "connections":conns,
                                     "total":conns.len()
-                                    }
-                                )
+                                })
                                 .to_string()
                                 .into(),
                             ))
@@ -317,6 +318,22 @@ async fn handle_connection(
                                 ))
                                 .unwrap();
                             }
+                        }
+                        ClientMessages::GetClients => {
+                            let conns = connections.lock().await;
+                            let mut clients: Vec<String> = vec![];
+                            for (client, _) in conns.iter() {
+                                clients.push(client.to_owned().clone());
+                            }
+                            tx.send(Message::Text(
+                                serde_json::json!({
+                                    "type":"list_clients",
+                                    "clients":clients
+                                })
+                                .to_string()
+                                .into(),
+                            ))
+                            .unwrap();
                         }
                     },
                     Err(e) => {

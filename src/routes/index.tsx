@@ -2,6 +2,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -12,6 +21,7 @@ export const Route = createFileRoute("/")({
 
 function App() {
   const [connected, setIsConnected] = useState(false);
+  const [clients, setClients] = useState<string[] | null>(null);
   const [userId, setUserId] = useState(null);
   const [roomInput, setRoomInput] = useState("");
   const [roomName, setRoomName] = useState("");
@@ -25,6 +35,7 @@ function App() {
   useEffect(() => {
     if (connected && ws.current) {
       ws.current.send(JSON.stringify({ type: "info" }));
+      ws.current.send(JSON.stringify({ type: "get_clients" }));
     }
   }, [connected, ws.current]);
 
@@ -61,6 +72,9 @@ function App() {
               break;
             case "list_messages":
               setMessagesList(message.messages);
+              break;
+            case "list_clients":
+              setClients(message.clients);
               break;
             case "info":
               setUserId(message.user_id);
@@ -127,10 +141,11 @@ function App() {
           </div>
         ) : (
           <div className="m-4">
-            <Tabs>
-              <TabsList defaultValue="create">
+            <Tabs defaultValue="create">
+              <TabsList>
                 <TabsTrigger value="create">Create</TabsTrigger>
                 <TabsTrigger value="join">Join</TabsTrigger>
+                <TabsTrigger value="all_users">all users</TabsTrigger>
               </TabsList>
               <TabsContent value="create">
                 <div className=" flex flex-col gap-2">
@@ -178,6 +193,33 @@ function App() {
                     Join
                   </Button>
                 </div>
+              </TabsContent>
+              <TabsContent value="all_users">
+                {clients && (
+                  <Table>
+                    <TableCaption>A list of all users</TableCaption>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[100px]">Invoice</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Chat</TableHead>
+                        <TableHead className="text-right"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {clients
+                        ?.filter((client) => client !== userId)
+                        .map((client) => (
+                          <TableRow>
+                            <TableCell className="font-medium">
+                              INV001
+                            </TableCell>
+                            <TableCell>{client}</TableCell>
+                          </TableRow>
+                        ))}
+                    </TableBody>
+                  </Table>
+                )}
               </TabsContent>
             </Tabs>
           </div>
