@@ -1,10 +1,7 @@
-use crate::{
-    handlers,
-    types::{AppState, ClientMessages},
-};
+use crate::{app_state::AppState, handlers, types::ClientMessages};
 use futures::{SinkExt, StreamExt};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
-use tokio::{net::TcpStream, sync::mpsc::UnboundedSender};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -64,8 +61,6 @@ pub async fn handle_connection(stream: TcpStream, app_state: AppState) {
                             ));
                         }
 
-                        ClientMessages::ListConn => list_connections(&app_state, &tx).await,
-
                         ClientMessages::Join { room } => {
                             handlers::room::join(&app_state, &user_id, &room, &tx).await;
                         }
@@ -90,8 +85,8 @@ pub async fn handle_connection(stream: TcpStream, app_state: AppState) {
                         ClientMessages::RoomDetails { room } => {
                             handlers::room::details(&app_state, &tx, &room).await;
                         }
-                        ClientMessages::GetClients => {
-                            get_clients(&app_state, &tx).await;
+                        ClientMessages::LeaveRoom { room, user } => {
+                            handlers::room::leave_room(&app_state, &tx, room, user).await;
                         }
                     },
                     Err(e) => {
@@ -130,50 +125,17 @@ pub async fn handle_connection(stream: TcpStream, app_state: AppState) {
         }
     }
 
-    {
-        let mut connections_guard = app_state.connections.lock().await;
-        connections_guard.remove(&user_id);
-        info!("Removed user {} from connections", user_id);
-    }
+    let mut connections_guard = app_state.connections.lock().await;
+    app_state.remove_from_rooms(user_id.clone()).await;
+    connections_guard.remove(&user_id);
+    info!("Removed user {} from connections", user_id);
 
     {
-        let mut rooms_guard = app_state.rooms.lock().await;
-        for room in rooms_guard.values_mut() {
+        let rooms = app_state.get_rooms().await;
+        for mut room in rooms {
             room.users.retain(|id| id != &user_id);
         }
     }
 
     info!("Connection ended for user: {}", user_id);
-}
-
-async fn list_connections(app_state: &AppState, tx: &UnboundedSender<Message>) {
-    let mut conns: Vec<String> = vec![];
-    for (conn, _) in app_state.connections.lock().await.iter() {
-        conns.push(conn.to_string());
-    }
-    tx.send(Message::Text(
-        serde_json::json!({
-            "connections":conns,
-            "total":conns.len()
-        })
-        .to_string()
-        .into(),
-    ))
-    .unwrap();
-}
-
-async fn get_clients(app_state: &AppState, tx: &UnboundedSender<Message>) {
-    let mut clients: Vec<String> = vec![];
-    for (str, _) in app_state.connections.lock().await.iter() {
-        clients.push(str.clone());
-    }
-    tx.send(Message::Text(
-        serde_json::json!({
-            "type":"get_client",
-            "clients":clients
-        })
-        .to_string()
-        .into(),
-    ))
-    .unwrap();
 }

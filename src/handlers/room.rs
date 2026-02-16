@@ -3,7 +3,10 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::types::{AppState, Room, RoomMessages};
+use crate::{
+    app_state::AppState,
+    types::{Room, RoomMessage},
+};
 
 pub async fn join(
     app_state: &AppState,
@@ -11,34 +14,18 @@ pub async fn join(
     room: &String,
     tx: &UnboundedSender<Message>,
 ) {
-    info!("User {} requesting to join room: {}", user_id, room);
-    let mut rooms_guard = app_state.rooms.lock().await;
-    if let Some(room_data) = rooms_guard.get_mut(room) {
-        if !room_data.users.contains(&user_id) {
-            room_data.users.push(user_id.clone());
-        }
+    let room_data = app_state
+        .add_to_room(room.to_owned(), user_id.to_owned())
+        .await;
+    let room_id = room_data.room.clone();
+    let response = serde_json::json!({
+        "type": "room_joined",
+        "room_id": room_id,
+        "room_name": room_data.room_name
+    });
 
-        let room_id = room_data.room.clone();
-        let response = serde_json::json!({
-            "type": "room_joined",
-            "room_id": room_id,
-            "room_name": room_data.room_name
-        });
-
-        if let Err(e) = tx.send(Message::Text(response.to_string().into())) {
-            error!("Error while sending room_id {}: {:?}", room_id, e);
-        }
-
-        info!("User {} joined room {}", user_id, room_id);
-    } else {
-        error!("Room {} not found", room);
-        let error_response = serde_json::json!({
-            "type": "error",
-            "message": "Room not found"
-        });
-        if let Err(e) = tx.send(Message::Text(error_response.to_string().into())) {
-            error!("Error while sending error message: {:?}", e);
-        }
+    if let Err(e) = tx.send(Message::Text(response.to_string().into())) {
+        error!("Error while sending room_id {}: {:?}", room_id, e);
     }
 }
 pub async fn create(
@@ -47,20 +34,15 @@ pub async fn create(
     room_name: &String,
     tx: &UnboundedSender<Message>,
 ) {
-    info!("User {} creating room: {}", user_id, room_name);
-
     let room_id = Uuid::new_v4().to_string();
     let room = Room {
         room_name: room_name.clone(),
         room: room_id.clone(),
+        messages: vec![],
         users: vec![user_id.clone()],
         admin: user_id.clone(),
     };
-
-    {
-        let mut rooms_guard = app_state.rooms.lock().await;
-        rooms_guard.insert(room_id.clone(), room);
-    }
+    app_state.create_room(room).await;
 
     let response = serde_json::json!({
         "type": "room_created",
@@ -71,6 +53,8 @@ pub async fn create(
     if let Err(e) = tx.send(Message::Text(response.to_string().into())) {
         error!("Error while sending room_id {}: {:?}", room_id, e);
     }
+
+    info!("User {} creating room: {}", user_id, room_name);
 
     let broadcast_msg = serde_json::json!({
         "type": "room_available",
@@ -89,34 +73,23 @@ pub async fn create(
 }
 
 pub async fn get(app_state: &AppState, tx: &UnboundedSender<Message>) {
-    let mut _rooms: Vec<Room> = vec![];
-    for (_, room) in app_state.rooms.lock().await.iter() {
-        _rooms.push(room.clone());
-    }
+    let mut _rooms: Vec<Room> = app_state.get_rooms().await;
     let message = serde_json::to_string(&_rooms.clone()).unwrap();
     tx.send(Message::Text(message.into())).unwrap();
 }
 
 pub async fn broadcast(app_state: &AppState, message: String, room: String, by: String) {
     let connections_guard = app_state.connections.lock().await;
-    let rooms_guard = app_state.rooms.lock().await;
-    let mut room_messages_guard = app_state.messages.lock().await;
-    let _room = rooms_guard.get(&room.clone()).unwrap();
-
-    {
-        let list = room_messages_guard
-            .entry(room.clone())
-            .or_insert_with(Vec::new);
-
-        list.push(RoomMessages {
-            by: by.clone(),
-            message: message.clone(),
-        });
-    }
+    let _room = app_state.get_room(room.clone()).await;
+    let room_message = RoomMessage {
+        by: by.clone(),
+        message: message.clone(),
+    };
+    app_state.add_message(room.clone(), room_message).await;
 
     for user in _room.users.iter() {
         if let Some(tx) = connections_guard.get(user) {
-            if let Err(err) = tx.send(tokio_tungstenite::tungstenite::Message::Text(
+            if let Err(err) = tx.send(Message::Text(
                 serde_json::json!({
                     "type":"room_broadcast",
                     "by":by,
@@ -134,33 +107,35 @@ pub async fn broadcast(app_state: &AppState, message: String, room: String, by: 
 }
 
 pub async fn list_messages(app_state: &AppState, room: &String, tx: &UnboundedSender<Message>) {
-    let room_messages_guard = app_state.messages.lock().await;
-    if let Some(_list) = room_messages_guard.get(room) {
-        info!("list room request received");
-        let _ = tx.send(Message::Text(
+    info!("list room request received");
+    let _room = app_state.get_room(room.to_owned()).await;
+    let _list = _room.messages;
+    let _ = tx
+        .send(Message::Text(
             serde_json::json!({
                 "type":"list_messages",
                 "messages": _list.to_owned(),
             })
             .to_string()
             .into(),
-        ));
-    } else {
-        let _ = tx.send(Message::Text(
-            serde_json::json!({
-                "type":"list_messages",
-                "messages": [],
-            })
-            .to_string()
-            .into(),
-        ));
-    }
+        ))
+        .unwrap();
 }
 
 pub async fn details(app_state: &AppState, tx: &UnboundedSender<Message>, room: &String) {
-    let rooms_guard = app_state.rooms.lock().await;
-    if let Some(_room) = rooms_guard.get(room) {
-        tx.send(Message::Text(serde_json::to_string(_room).unwrap().into()))
-            .unwrap();
+    let _room = app_state.get_room(room.to_owned()).await;
+    tx.send(Message::Text(serde_json::to_string(&_room).unwrap().into()))
+        .unwrap();
+}
+
+pub async fn leave_room(
+    app_state: &AppState,
+    tx: &UnboundedSender<Message>,
+    room: String,
+    user: String,
+) {
+    let room = app_state.remove_from_room(room, user).await;
+    if let Err(err) = tx.send(Message::Text(serde_json::to_string(&room).unwrap().into())) {
+        error!("Error while sending message {}", err.to_string());
     }
 }

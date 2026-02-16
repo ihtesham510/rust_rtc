@@ -2,229 +2,374 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 export const Route = createFileRoute("/")({
-  component: App,
+	component: App,
 });
 
+interface AvailableRooms {
+	room_id: string;
+	room_name: string;
+}
+interface Room {
+	room_name: string;
+	room: string;
+	messages: Array<{ by: string; message: string }>;
+	users: Array<string>;
+	admin: string;
+}
+type Reducer = Room | null;
+type ReducerAction =
+	| { type: "set_room"; room: Reducer }
+	| { type: "add_message"; message: { by: string; message: string } }
+	| { type: "set_messages"; messages: Array<{ by: string; message: string }> };
+
 function App() {
-  const [connected, setIsConnected] = useState(false);
-  const [clients, setClients] = useState<string[] | null>(null);
-  const [userId, setUserId] = useState(null);
-  const [roomInput, setRoomInput] = useState("");
-  const [roomName, setRoomName] = useState("");
-  const [room, setRoom] = useState<string | null>(null);
-  const [messagesList, setMessagesList] = useState<
-    { by: string; message: string }[] | null
-  >(null);
-  const [msg, setMsg] = useState<string>("");
+	function reducer(state: Reducer, action: ReducerAction): Reducer {
+		switch (action.type) {
+			case "set_room":
+				return action.room;
+			case "add_message":
+				if (state) {
+					return {
+						...state,
+						messages: [...state.messages, action.message],
+					};
+				}
+				return state;
+			case "set_messages":
+				if (state) {
+					return {
+						...state,
+						messages: action.messages,
+					};
+				}
+				return state;
+			default:
+				return state;
+		}
+	}
+	const [room, dispatchRoom] = useReducer(reducer, null);
+	const roomRef = useRef<Room | null>(null);
 
-  const ws = useRef<WebSocket | null>(null);
-  useEffect(() => {
-    if (connected && ws.current) {
-      ws.current.send(JSON.stringify({ type: "info" }));
-      ws.current.send(JSON.stringify({ type: "get_clients" }));
-    }
-  }, [connected, ws.current]);
+	// Keep roomRef in sync with room state
+	useEffect(() => {
+		roomRef.current = room;
+	}, [room]);
 
-  useEffect(() => {
-    (() => {
-      const websocket = new WebSocket("ws://127.0.0.1:4000");
-      ws.current = websocket;
-      if (ws.current) {
-        ws.current.onopen = () => {
-          setIsConnected(true);
-        };
-        ws.current.onclose = () => {
-          setIsConnected(false);
-          setRoom(null);
-          setMessagesList(null);
-          setUserId(null);
-        };
-        ws.current.onmessage = (event) => {
-          console.log(event.data);
-          const message = JSON.parse(event.data);
-          switch (message.type) {
-            case "room_created":
-              setRoom(message.room_id);
-              setMessagesList([]);
-              break;
-            case "room_joined":
-              setRoom(message.room_id);
-              ws.current?.send(
-                JSON.stringify({
-                  type: "list_messages",
-                  room: message.room_id,
-                }),
-              );
-              break;
-            case "list_messages":
-              setMessagesList(message.messages);
-              break;
-            case "list_clients":
-              setClients(message.clients);
-              break;
-            case "info":
-              setUserId(message.user_id);
-              break;
-            case "room_broadcast":
-              console.log("message received : ", message);
-              const newMsg = {
-                by: message.by,
-                message: message.message,
-              };
-              setMessagesList((prev) => (prev ? [...prev, newMsg] : [newMsg]));
-              break;
-          }
-        };
-      }
-    })();
-    return () => ws.current?.close();
-  }, []);
+	const [connected, setIsConnected] = useState(false);
+	const [userId, setUserId] = useState<string | null>(null);
+	const [availableRooms, setAvailableRooms] = useState<AvailableRooms[] | null>(
+		null,
+	);
+	const [roomInput, setRoomInput] = useState("");
+	const [roomName, setRoomName] = useState("");
+	const [msg, setMsg] = useState<string>("");
+	const ws = useRef<WebSocket | null>(null);
 
-  return (
-    <div className="m-6">
-      {connected ? "connected" : "disconnected"}
-      <div>
-        {room ? (
-          <div className="p-4 h-screen w-full grid space-y-4">
-            <div className="w-full flex items-center justify-between">
-              <h1 className="text-2xl font-bold">Send Message</h1>
-              <p>{room}</p>
-            </div>
-            {messagesList && messagesList?.length > 0 ? (
-              <ScrollArea className="border-border border rounded-md p-2 min-h-[400px] max-h-[800px] flex flex-col space-y-4">
-                {messagesList.map((msg, index) => (
-                  <div
-                    className={`bg-primary ${msg.by === userId && "place-self-end"} text-primary-foreground rounded-xl flex flex-col gap-1 p-2 m-2 max-w-fit`}
-                    key={index}
-                  >
-                    <p className="text-xs">{msg.by}</p>
-                    <p className="text-lg font-semibold">{msg.message}</p>
-                  </div>
-                ))}
-              </ScrollArea>
-            ) : (
-              <div className="border-border border rounded-md h-[400px] flex items-center justify-center">
-                <h1 className="text-2xl text-primary/50">No Messages Yet</h1>
-              </div>
-            )}
-            <div className="flex flex-col gap-2">
-              <Input value={msg} onChange={(e) => setMsg(e.target.value)} />
-              <Button
-                onClick={() => {
-                  ws.current?.send(
-                    JSON.stringify({
-                      type: "send_message",
-                      room,
-                      message: msg,
-                    }),
-                  );
-                  setMsg("");
-                }}
-              >
-                Send
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="m-4">
-            <Tabs defaultValue="create">
-              <TabsList>
-                <TabsTrigger value="create">Create</TabsTrigger>
-                <TabsTrigger value="join">Join</TabsTrigger>
-                <TabsTrigger value="all_users">all users</TabsTrigger>
-              </TabsList>
-              <TabsContent value="create">
-                <div className=" flex flex-col gap-2">
-                  <h1 className="text-2xl font-bold mb-6">Create Room</h1>
-                  <Label>Enter Room Name</Label>
-                  <Input
-                    value={roomName}
-                    onChange={(e) => setRoomName(e.target.value)}
-                  />
-                  <Button
-                    onClick={() => {
-                      if (ws.current) {
-                        ws.current.send(
-                          JSON.stringify({
-                            type: "create_room",
-                            room_name: roomName,
-                          }),
-                        );
-                      }
-                    }}
-                    disabled={roomName === ""}
-                  >
-                    Send Request
-                  </Button>
-                </div>
-              </TabsContent>
-              <TabsContent value="join">
-                <div className="flex flex-col gap-2">
-                  <h1 className="text-2xl font-bold mb-6">Join Room</h1>
-                  <Label>Enter Room Id</Label>
-                  <Input
-                    value={roomInput}
-                    onChange={(e) => setRoomInput(e.target.value)}
-                  />
-                  <Button
-                    onClick={() => {
-                      if (ws.current) {
-                        ws.current.send(
-                          JSON.stringify({ type: "join", room: roomInput }),
-                        );
-                      }
-                    }}
-                    disabled={roomInput === ""}
-                  >
-                    Join
-                  </Button>
-                </div>
-              </TabsContent>
-              <TabsContent value="all_users">
-                {clients && (
-                  <Table>
-                    <TableCaption>A list of all users</TableCaption>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[100px]">Invoice</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Chat</TableHead>
-                        <TableHead className="text-right"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {clients
-                        ?.filter((client) => client !== userId)
-                        .map((client) => (
-                          <TableRow>
-                            <TableCell className="font-medium">
-                              INV001
-                            </TableCell>
-                            <TableCell>{client}</TableCell>
-                          </TableRow>
-                        ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </TabsContent>
-            </Tabs>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+	useEffect(() => {
+		if (connected && ws.current) {
+			ws.current.send(JSON.stringify({ type: "info" }));
+			ws.current.send(JSON.stringify({ type: "get_rooms" }));
+		}
+	}, [connected]);
+
+	useEffect(() => {
+		(() => {
+			const websocket = new WebSocket("ws://127.0.0.1:4000");
+			ws.current = websocket;
+			if (ws.current) {
+				ws.current.onopen = () => {
+					setIsConnected(true);
+				};
+				ws.current.onclose = () => {
+					setIsConnected(false);
+					dispatchRoom({
+						type: "set_room",
+						room: null,
+					});
+					setUserId(null);
+				};
+				ws.current.onmessage = (event) => {
+					console.log(event.data);
+					const data = JSON.parse(event.data);
+
+					// Handle array response from get_rooms
+					if (Array.isArray(data)) {
+						const rooms: AvailableRooms[] = data.map((room: Room) => ({
+							room_id: room.room,
+							room_name: room.room_name,
+						}));
+						setAvailableRooms(rooms);
+						return;
+					}
+
+					const message = data;
+					switch (message.type) {
+						case "room_available":
+							console.log("room_available");
+							setAvailableRooms((prev) =>
+								prev
+									? [
+											...prev,
+											{
+												room_id: message.room_id,
+												room_name: message.room_name,
+											},
+										]
+									: [
+											{
+												room_id: message.room_id,
+												room_name: message.room_name,
+											},
+										],
+							);
+							break;
+						case "room_created":
+							dispatchRoom({
+								type: "set_room",
+								room: {
+									room_name: message.room_name,
+									room: message.room_id,
+									messages: [],
+									users: [],
+									admin: userId || "",
+								},
+							});
+							break;
+						case "room_joined":
+							dispatchRoom({
+								type: "set_room",
+								room: {
+									room_name: message.room_name,
+									room: message.room_id,
+									messages: [],
+									users: [],
+									admin: "",
+								},
+							});
+							ws.current?.send(
+								JSON.stringify({
+									type: "list_messages",
+									room: message.room_id,
+								}),
+							);
+							break;
+						case "list_messages":
+							dispatchRoom({
+								type: "set_messages",
+								messages: message.messages,
+							});
+							break;
+						case "info":
+							setUserId(message.user_id);
+							break;
+						case "room_broadcast":
+							dispatchRoom({
+								type: "add_message",
+								message: {
+									by: message.by,
+									message: message.message,
+								},
+							});
+							break;
+						default:
+							if (
+								message.room &&
+								message.room_name &&
+								message.messages &&
+								message.users &&
+								message.admin !== undefined
+							) {
+								dispatchRoom({
+									type: "set_room",
+									room: {
+										room_name: message.room_name,
+										room: message.room,
+										messages: message.messages,
+										users: message.users,
+										admin: message.admin,
+									},
+								});
+							}
+							break;
+					}
+				};
+			}
+		})();
+		return () => ws.current?.close();
+	}, []);
+
+	function joinRoom(id: string) {
+		ws.current?.send(JSON.stringify({ type: "join", room: id }));
+	}
+
+	function leaveRoom() {
+		if (room && userId) {
+			ws.current?.send(
+				JSON.stringify({
+					type: "leave_room",
+					room: room.room,
+					user: userId,
+				}),
+			);
+			dispatchRoom({
+				type: "set_room",
+				room: null,
+			});
+		}
+	}
+
+	function getRoomDetails() {
+		if (room) {
+			ws.current?.send(
+				JSON.stringify({
+					type: "get_room",
+					room: room.room,
+				}),
+			);
+		}
+	}
+
+	return (
+		<div className="m-6">
+			{connected ? "connected" : "disconnected"}
+			<div>
+				{room ? (
+					<div className="p-4 h-screen w-full grid space-y-4">
+						<div className="w-full flex items-center justify-between">
+							<h1 className="text-2xl font-bold">{room.room_name}</h1>
+							<div className="flex gap-2 items-center">
+								<p className="text-sm text-muted-foreground">{room.room}</p>
+								<Button variant="outline" onClick={getRoomDetails}>
+									Refresh
+								</Button>
+								<Button variant="destructive" onClick={leaveRoom}>
+									Leave Room
+								</Button>
+							</div>
+						</div>
+						{room.messages && room.messages.length > 0 ? (
+							<ScrollArea className="border-border border rounded-md p-2 min-h-[400px] max-h-[800px] flex flex-col space-y-4">
+								{room.messages.map((msg, index) => (
+									<div
+										className={`bg-primary ${msg.by === userId && "place-self-end"} text-primary-foreground rounded-xl flex flex-col gap-1 p-2 m-2 max-w-fit`}
+										key={index}
+									>
+										<p className="text-xs">{msg.by}</p>
+										<p className="text-lg font-semibold">{msg.message}</p>
+									</div>
+								))}
+							</ScrollArea>
+						) : (
+							<div className="border-border border rounded-md h-[400px] flex items-center justify-center">
+								<h1 className="text-2xl text-primary/50">No Messages Yet</h1>
+							</div>
+						)}
+						<div className="flex flex-col gap-2">
+							<Input value={msg} onChange={(e) => setMsg(e.target.value)} />
+							<Button
+								onClick={() => {
+									if (room) {
+										ws.current?.send(
+											JSON.stringify({
+												type: "send_message",
+												room: room.room,
+												message: msg,
+											}),
+										);
+										setMsg("");
+									}
+								}}
+								disabled={!msg.trim()}
+							>
+								Send
+							</Button>
+						</div>
+					</div>
+				) : (
+					<div className="m-4">
+						<Tabs defaultValue="create">
+							<TabsList>
+								<TabsTrigger value="create">Create</TabsTrigger>
+								<TabsTrigger value="join">Join</TabsTrigger>
+								<TabsTrigger value="rooms">Rooms</TabsTrigger>
+							</TabsList>
+							<TabsContent value="create">
+								<div className=" flex flex-col gap-2">
+									<h1 className="text-2xl font-bold mb-6">Create Room</h1>
+									<Label>Enter Room Name</Label>
+									<Input
+										value={roomName}
+										onChange={(e) => setRoomName(e.target.value)}
+									/>
+									<Button
+										onClick={() => {
+											if (ws.current) {
+												ws.current.send(
+													JSON.stringify({
+														type: "create_room",
+														room_name: roomName,
+													}),
+												);
+											}
+										}}
+										disabled={roomName === ""}
+									>
+										Send Request
+									</Button>
+								</div>
+							</TabsContent>
+							<TabsContent value="join">
+								<div className="flex flex-col gap-2">
+									<h1 className="text-2xl font-bold mb-6">Join Room</h1>
+									<Label>Enter Room Id</Label>
+									<Input
+										value={roomInput}
+										onChange={(e) => setRoomInput(e.target.value)}
+									/>
+									<Button
+										onClick={() => {
+											if (ws.current) {
+												ws.current.send(
+													JSON.stringify({ type: "join", room: roomInput }),
+												);
+											}
+										}}
+										disabled={roomInput === ""}
+									>
+										Join
+									</Button>
+								</div>
+							</TabsContent>
+							<TabsContent value="rooms">
+								{availableRooms && availableRooms.length !== 0 ? (
+									availableRooms.map((room) => (
+										<div
+											className="flex justify-between border-border border p-4 rounded-md"
+											key={room.room_id}
+										>
+											<h1 className="text-xl font-bold">{room.room_name}</h1>
+											<Button
+												onClick={() => {
+													joinRoom(room.room_id);
+												}}
+											>
+												Join
+											</Button>
+										</div>
+									))
+								) : (
+									<div>no rooms avaialbe</div>
+								)}
+							</TabsContent>
+						</Tabs>
+					</div>
+				)}
+			</div>
+		</div>
+	);
 }

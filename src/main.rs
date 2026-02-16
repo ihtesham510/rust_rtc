@@ -1,15 +1,18 @@
+use dotenv::dotenv;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::{handlers::connections::handle_connection, types::AppState};
+use crate::{app_state::AppState, handlers::connections::handle_connection};
 
+mod app_state;
 mod handlers;
+mod redis;
 mod types;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv().ok();
     tracing_subscriber::fmt().with_env_filter("info").init();
-
     let addr = "127.0.0.1:4000";
     let listener = TcpListener::bind(addr).await?;
     info!("WebSocket server running on ws://{}", addr);

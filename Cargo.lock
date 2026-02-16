@@ -68,6 +68,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
+name = "arcstr"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03918c3dbd7701a85c6b9887732e2921175f26c350b4563841d0958c21d57e6d"
+
+[[package]]
 name = "asn1-rs"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -292,6 +298,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "combine"
+version = "4.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
+dependencies = [
+ "bytes",
+ "memchr",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -441,6 +457,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "dtls"
@@ -1335,6 +1357,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e969d1d702793536d5fda739a82b88ad7cbe7d04f8386ee8cd16ad3eff4854a5"
+dependencies = [
+ "arcstr",
+ "combine",
+ "itoa",
+ "num-bigint",
+ "percent-encoding",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.6.0",
+ "url",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1400,7 +1440,9 @@ dependencies = [
 name = "rtc"
 version = "0.1.0"
 dependencies = [
+ "dotenv",
  "futures",
+ "redis",
  "serde",
  "serde_json",
  "tokio",
@@ -1599,6 +1641,12 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "sha2"
@@ -2516,6 +2564,12 @@ dependencies = [
  "thiserror 1.0.69",
  "time",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yasna"

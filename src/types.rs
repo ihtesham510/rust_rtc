@@ -1,6 +1,7 @@
-use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::Mutex;
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, mpsc::UnboundedSender};
 use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,8 +13,6 @@ pub enum ClientMessages {
     Create { room_name: String },
     #[serde(rename = "info")]
     Info,
-    #[serde(rename = "get_clients")]
-    GetClients,
     #[serde(rename = "get_rooms")]
     GetRooms,
     #[serde(rename = "send_message")]
@@ -22,41 +21,23 @@ pub enum ClientMessages {
     ListRoomMessages { room: String },
     #[serde(rename = "get_room")]
     RoomDetails { room: String },
-    #[serde(rename = "list_connections")]
-    ListConn,
+    #[serde(rename = "leave_room")]
+    LeaveRoom { room: String, user: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Room {
     pub room_name: String,
     pub room: String,
+    pub messages: Vec<RoomMessage>,
     pub users: Vec<String>,
     pub admin: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct RoomMessages {
+pub struct RoomMessage {
     pub by: String,
     pub message: String,
 }
 
-pub type Rooms = Arc<Mutex<HashMap<String, Room>>>;
-pub type Messages = Arc<Mutex<HashMap<String, Vec<RoomMessages>>>>;
-pub type Connections = Arc<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Message>>>>;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub rooms: Rooms,
-    pub messages: Messages,
-    pub connections: Connections,
-}
-
-impl AppState {
-    pub fn new() -> Self {
-        Self {
-            rooms: Arc::new(Mutex::new(HashMap::new())),
-            messages: Arc::new(Mutex::new(HashMap::new())),
-            connections: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-}
+pub type Connections = Arc<Mutex<HashMap<String, UnboundedSender<Message>>>>;
