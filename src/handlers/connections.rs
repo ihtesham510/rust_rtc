@@ -71,7 +71,7 @@ pub async fn handle_connection(stream: TcpStream, app_state: AppState) {
                             handlers::room::get(&app_state, &tx).await;
                         }
                         ClientMessages::SendMessageToRoom { message, room } => {
-                            handlers::room::broadcast(
+                            handlers::room::broadcast_message(
                                 &app_state,
                                 message.clone(),
                                 room,

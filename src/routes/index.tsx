@@ -10,17 +10,6 @@ export const Route = createFileRoute("/")({
 	component: App,
 });
 
-interface AvailableRooms {
-	room_id: string;
-	room_name: string;
-}
-interface Room {
-	room_name: string;
-	room: string;
-	messages: Array<{ by: string; message: string }>;
-	users: Array<string>;
-	admin: string;
-}
 type Reducer = Room | null;
 type ReducerAction =
 	| { type: "set_room"; room: Reducer }
@@ -77,6 +66,7 @@ function App() {
 		}
 	}, [connected]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
 	useEffect(() => {
 		(() => {
 			const websocket = new WebSocket("ws://127.0.0.1:4000");
@@ -94,8 +84,8 @@ function App() {
 					setUserId(null);
 				};
 				ws.current.onmessage = (event) => {
-					console.log(event.data);
 					const data = JSON.parse(event.data);
+					console.log(data);
 
 					// Handle array response from get_rooms
 					if (Array.isArray(data)) {
@@ -107,7 +97,7 @@ function App() {
 						return;
 					}
 
-					const message = data;
+					const message = data as Messages;
 					switch (message.type) {
 						case "room_available":
 							console.log("room_available");
@@ -164,6 +154,18 @@ function App() {
 								messages: message.messages,
 							});
 							break;
+						case "rooms_available":
+							setAvailableRooms(
+								message.rooms.map(
+									(room: { room: string; room_name: string }) => {
+										return {
+											room_id: room.room,
+											room_name: room.room_name,
+										} satisfies AvailableRooms;
+									},
+								),
+							);
+							break;
 						case "info":
 							setUserId(message.user_id);
 							break;
@@ -175,26 +177,6 @@ function App() {
 									message: message.message,
 								},
 							});
-							break;
-						default:
-							if (
-								message.room &&
-								message.room_name &&
-								message.messages &&
-								message.users &&
-								message.admin !== undefined
-							) {
-								dispatchRoom({
-									type: "set_room",
-									room: {
-										room_name: message.room_name,
-										room: message.room,
-										messages: message.messages,
-										users: message.users,
-										admin: message.admin,
-									},
-								});
-							}
 							break;
 					}
 				};

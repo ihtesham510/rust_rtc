@@ -72,13 +72,23 @@ pub async fn create(
     info!("Room created: {} ({})", room_name, room_id);
 }
 
+pub async fn broadcast_to_all(app_state: &AppState, message: String) {
+    let connections_guard = app_state.connections.lock().await;
+    for conn in connections_guard.iter() {
+        let (_, tx) = conn;
+        if let Err(err) = tx.send(Message::Text(message.clone().into())) {
+            error!("Error while sending message {}", err.to_string());
+        }
+    }
+}
+
 pub async fn get(app_state: &AppState, tx: &UnboundedSender<Message>) {
     let mut _rooms: Vec<Room> = app_state.get_rooms().await;
     let message = serde_json::to_string(&_rooms.clone()).unwrap();
     tx.send(Message::Text(message.into())).unwrap();
 }
 
-pub async fn broadcast(app_state: &AppState, message: String, room: String, by: String) {
+pub async fn broadcast_message(app_state: &AppState, message: String, room: String, by: String) {
     let connections_guard = app_state.connections.lock().await;
     let _room = app_state.get_room(room.clone()).await;
     let room_message = RoomMessage {
@@ -135,7 +145,30 @@ pub async fn leave_room(
     user: String,
 ) {
     let room = app_state.remove_from_room(room, user).await;
-    if let Err(err) = tx.send(Message::Text(serde_json::to_string(&room).unwrap().into())) {
-        error!("Error while sending message {}", err.to_string());
+    match room {
+        Some(r) => {
+            if let Err(err) = tx.send(Message::Text(
+                serde_json::json!({
+                    "type":"room_left",
+                    "room":r.room
+                })
+                .to_string()
+                .into(),
+            )) {
+                error!("Error while sending message {}", err.to_string());
+            }
+        }
+        None => {
+            let rooms = app_state.get_rooms().await;
+            broadcast_to_all(
+                app_state,
+                serde_json::json!({
+                    "type":"rooms_available",
+                    "rooms":rooms
+                })
+                .to_string(),
+            )
+            .await;
+        }
     }
 }
